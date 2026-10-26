@@ -318,9 +318,13 @@ javascript:( function() {
             wrapper.appendChild( content );
             wrapper.appendChild( footer );
             document.body.appendChild( wrapper );
-            let isDragging = false, offsetX = 0, offsetY = 0;
+            let isDragging = false, didDrag = false, startX = 0, startY = 0, offsetX = 0, offsetY = 0;
+            const DRAG_THRESHOLD = 5;
             header.addEventListener( "mousedown", e => {
                 isDragging = true;
+                didDrag = false;
+                startX = e.clientX;
+                startY = e.clientY;
                 offsetX = e.clientX - wrapper.offsetLeft;
                 offsetY = e.clientY - wrapper.offsetTop;
                 wrapper.style.left = wrapper.offsetLeft + 'px';
@@ -331,12 +335,24 @@ javascript:( function() {
             } );
             document.addEventListener( "mouseup", () => isDragging = false );
             document.addEventListener( "mousemove", e => {
-                if ( isDragging ) {
-                    wrapper.style.left = ( e.clientX - offsetX ) + 'px';
-                    wrapper.style.top = ( e.clientY - offsetY ) + 'px';
+                if ( !isDragging ) {
+                    return;
                 }
+                if ( !didDrag ) {
+                    const dx = e.clientX - startX;
+                    const dy = e.clientY - startY;
+                    if ( Math.abs( dx ) < DRAG_THRESHOLD && Math.abs( dy ) < DRAG_THRESHOLD ) {
+                        return;
+                    }
+                    didDrag = true;
+                }
+                wrapper.style.left = ( e.clientX - offsetX ) + 'px';
+                wrapper.style.top = ( e.clientY - offsetY ) + 'px';
             } );
             header.addEventListener( "click", () => {
+                if ( didDrag ) {
+                    return;
+                }
                 const footer = wrapper.querySelector( ".work-stats-footer" );
                 const isHidden = content.style.display === "none";
                 content.style.display = isHidden ? "block" : "none";
