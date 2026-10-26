@@ -1,24 +1,69 @@
 javascript:( function() {
     const BOX_ID = 'myCustomAsciiTableBox_12345';
+    const EXCLUDE_CARRIED_OVER_KEY = BOX_ID + '_excludeCarriedOver';
+    const KEYDOWN_BOUND_KEY = BOX_ID + '_keydownBound';
     const EXCLUDED_PEOPLE = ["Trinh Nguyen", "BeSmartee AI Agent", "Aaron Joseph", "Ngoc Nguyen", "Oanh Phan", "Nhung Tran", "An La", "Darryl Namayan", "Sarah Tan", "Tamine De Luna", "Noel Leon", ""];
     const STATUS_ORDER = ["Blocked", "Backlog", "Ready For Development", "In Development", "Code Review", "Ready For Testing", "In Testing", "Product Sign-off", "Cancelled", "Done"];
     const DEV_ORDER = ["Nghia Vu", "Anthony Diep", "Thong Trinh", "Cuong Le", "Huy Tran", "Alexandre Santiago", "Huy Chau", "Nghi Ho"];
     let workStats = {};
-    let allStatuses = new Set();        /* Iterate through each ticket */
-    jQuery( "tr.issuerow" ).each( function() {
-        let ticketData = { storyPoints: getStoryPoints( jQuery( this ) ), developer: getDeveloper( jQuery( this ) ), codeReviewers: getCodeReviewers( jQuery( this ) ), isRegressionBug: determineIfIsRegressionBug( jQuery( this ) ), status: getStatus( jQuery( this ) ), isBlocked: getIsBlocked( jQuery( this ) ) };
-        if ( ticketData.status ) {
-            allStatuses.add( ticketData.status );
+    let allStatuses = new Set();
+
+    function getExcludeCarriedOver() {
+        if ( typeof window[EXCLUDE_CARRIED_OVER_KEY] !== "boolean" ) {
+            window[EXCLUDE_CARRIED_OVER_KEY] = true;
         }
-        if ( ticketData.isBlocked ) {
-            allStatuses.add( "Blocked" );
+        return window[EXCLUDE_CARRIED_OVER_KEY];
+    }
+
+    function setExcludeCarriedOver( value ) {
+        window[EXCLUDE_CARRIED_OVER_KEY] = value;
+    }
+
+    function recalculateAndRender() {
+        workStats = {};
+        allStatuses = new Set();
+        const excludeCarriedOver = getExcludeCarriedOver();
+        jQuery( "tr.issuerow" ).each( function() {
+            const row = jQuery( this );
+            if ( excludeCarriedOver && hasAssignedSLabel( row ) ) {
+                return;
+            }
+            let ticketData = { storyPoints: getStoryPoints( row ), developer: getDeveloper( row ), codeReviewers: getCodeReviewers( row ), isRegressionBug: determineIfIsRegressionBug( row ), status: getStatus( row ), isBlocked: getIsBlocked( row ) };
+            if ( ticketData.status ) {
+                allStatuses.add( ticketData.status );
+            }
+            if ( ticketData.isBlocked ) {
+                allStatuses.add( "Blocked" );
+            }
+            workStats = updateWorkStats( workStats, ticketData );
+        } );
+        let sortedStatuses = sortByPredefinedOrder( Array.from( allStatuses ), STATUS_ORDER );
+        let sortedDevs = sortByPredefinedOrder( Object.keys( removeExcludedPeople( workStats ) ), DEV_ORDER );
+        let tableStr = buildTable( workStats, sortedStatuses, sortedDevs );
+        createOrUpdateBox( tableStr, excludeCarriedOver );
+    }
+
+    function bindCarriedOverHotkey() {
+        if ( window[KEYDOWN_BOUND_KEY] ) {
+            return;
         }
-        workStats = updateWorkStats( workStats, ticketData );
-    } );
-    let sortedStatuses = sortByPredefinedOrder( Array.from( allStatuses ), STATUS_ORDER );
-    let sortedDevs = sortByPredefinedOrder( Object.keys( removeExcludedPeople( workStats ) ), DEV_ORDER );
-    let tableStr = buildTable( workStats, sortedStatuses, sortedDevs );
-    createOrUpdateBox( tableStr );
+        window[KEYDOWN_BOUND_KEY] = true;
+        document.addEventListener( "keydown", function( e ) {
+            if ( !e.shiftKey || e.key.toLowerCase() !== "a" ) {
+                return;
+            }
+            const target = e.target;
+            if ( target && target.closest && target.closest( 'input, textarea, [contenteditable="true"]' ) ) {
+                return;
+            }
+            e.preventDefault();
+            setExcludeCarriedOver( !getExcludeCarriedOver() );
+            recalculateAndRender();
+        } );
+    }
+
+    bindCarriedOverHotkey();
+    recalculateAndRender();
 
     function clickRefreshButtons() {
         jQuery( '[data-testid="dashboard-internal-common.ui.gadget.toolbar.refresh-button"]' ).each( function() {
@@ -72,6 +117,16 @@ javascript:( function() {
             } );
         } );
         return labels;
+    }
+
+    function hasAssignedSLabel( selector ) {
+        let labels = getLabels( selector );
+        for ( let i = 0; i < labels.length; i++ ) {
+            if ( labels[i].startsWith( "Assigned-S" ) ) {
+                return true;
+            }
+        }
+        return false;
     }
 
     function determineIfIsRegressionBug( selector ) {
@@ -218,7 +273,14 @@ javascript:( function() {
         return [sep, headerRow, sep, metaBodyRows.join( "" ), sep, statusBodyRows.join( "" ), sep].join( "\n" );
     }
 
-    function createOrUpdateBox( tableHTML ) {
+    function buildCarriedOverStatusHtml( excludeCarriedOver ) {
+        if ( excludeCarriedOver ) {
+            return "Carried-over tickets are <strong>excluded</strong> from calculations.";
+        }
+        return "Carried-over tickets are <strong>included</strong> in calculations.";
+    }
+
+    function createOrUpdateBox( tableHTML, excludeCarriedOver ) {
         let wrapper = document.getElementById( BOX_ID );
         if ( !wrapper ) {
             wrapper = document.createElement( "div" );
@@ -245,8 +307,16 @@ javascript:( function() {
             content.style.padding = "10px";
             content.style.whiteSpace = "pre";
             content.style.display = "block";
+            const footer = document.createElement( "div" );
+            footer.className = "work-stats-footer";
+            footer.style.padding = "10px";
+            footer.style.borderTop = "1px solid #444";
+            footer.style.fontFamily = "monospace";
+            footer.style.fontSize = "12px";
+            footer.innerHTML = "<div style=\"margin-bottom:6px\"><strong>Tips</strong></div><ul style=\"margin:0 0 10px 18px;padding:0\"><li>Press <strong>Shift+A</strong> to toggle whether carried-over tickets (Assigned-S* labels) are included in calculations.</li></ul><div class=\"carried-over-status\"></div>";
             wrapper.appendChild( header );
             wrapper.appendChild( content );
+            wrapper.appendChild( footer );
             document.body.appendChild( wrapper );
             let isDragging = false, offsetX = 0, offsetY = 0;
             header.addEventListener( "mousedown", e => {
@@ -267,8 +337,12 @@ javascript:( function() {
                 }
             } );
             header.addEventListener( "click", () => {
+                const footer = wrapper.querySelector( ".work-stats-footer" );
                 const isHidden = content.style.display === "none";
                 content.style.display = isHidden ? "block" : "none";
+                if ( footer ) {
+                    footer.style.display = isHidden ? "block" : "none";
+                }
                 header.textContent = "Work Stats " + ( isHidden ? "▾" : "▸" );
             } );
         }
@@ -277,5 +351,9 @@ javascript:( function() {
         pre.querySelectorAll( "a[data-type][data-name]" ).forEach( a => {
             a.style.color = "#6cf";
         } );
+        const statusEl = wrapper.querySelector( ".carried-over-status" );
+        if ( statusEl ) {
+            statusEl.innerHTML = buildCarriedOverStatusHtml( excludeCarriedOver );
+        }
     }
 } )();
