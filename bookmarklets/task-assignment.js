@@ -1,7 +1,10 @@
 javascript:( function() {
     const BOX_ID = 'myCustomAsciiTableBox_12345';
     const EXCLUDE_CARRIED_OVER_KEY = BOX_ID + '_excludeCarriedOver';
+    const SHOW_COUNTS_KEY = BOX_ID + '_showCounts';
+    const SHOW_REVIEW_ROW_KEY = BOX_ID + '_showReviewRow';
     const KEYDOWN_BOUND_KEY = BOX_ID + '_keydownBound';
+    const KEYDOWN_HANDLER_KEY = BOX_ID + '_keydownHandler';
     const EXCLUDED_PEOPLE = ["Trinh Nguyen", "BeSmartee AI Agent", "Aaron Joseph", "Ngoc Nguyen", "Oanh Phan", "Nhung Tran", "An La", "Darryl Namayan", "Sarah Tan", "Tamine De Luna", "Noel Leon", ""];
     const STATUS_ORDER = ["Blocked", "Backlog", "Ready For Development", "In Development", "Code Review", "Ready For Testing", "In Testing", "Product Sign-off", "Cancelled", "Done"];
     const DEV_ORDER = ["Nghia Vu", "Anthony Diep", "Thong Trinh", "Cuong Le", "Huy Tran", "Alexandre Santiago", "Huy Chau", "Nghi Ho"];
@@ -19,10 +22,34 @@ javascript:( function() {
         window[EXCLUDE_CARRIED_OVER_KEY] = value;
     }
 
+    function getShowCounts() {
+        if ( typeof window[SHOW_COUNTS_KEY] !== "boolean" ) {
+            window[SHOW_COUNTS_KEY] = true;
+        }
+        return window[SHOW_COUNTS_KEY];
+    }
+
+    function setShowCounts( value ) {
+        window[SHOW_COUNTS_KEY] = value;
+    }
+
+    function getShowReviewRow() {
+        if ( typeof window[SHOW_REVIEW_ROW_KEY] !== "boolean" ) {
+            window[SHOW_REVIEW_ROW_KEY] = true;
+        }
+        return window[SHOW_REVIEW_ROW_KEY];
+    }
+
+    function setShowReviewRow( value ) {
+        window[SHOW_REVIEW_ROW_KEY] = value;
+    }
+
     function recalculateAndRender() {
         workStats = {};
         allStatuses = new Set();
         const excludeCarriedOver = getExcludeCarriedOver();
+        const showCounts = getShowCounts();
+        const showReviewRow = getShowReviewRow();
         jQuery( "tr.issuerow" ).each( function() {
             const row = jQuery( this );
             if ( excludeCarriedOver && hasAssignedSLabel( row ) ) {
@@ -39,17 +66,22 @@ javascript:( function() {
         } );
         let sortedStatuses = sortByPredefinedOrder( Array.from( allStatuses ), STATUS_ORDER );
         let sortedDevs = sortByPredefinedOrder( Object.keys( removeExcludedPeople( workStats ) ), DEV_ORDER );
-        let tableStr = buildTable( workStats, sortedStatuses, sortedDevs );
+        let tableStr = buildTable( workStats, sortedStatuses, sortedDevs, showCounts, showReviewRow );
         createOrUpdateBox( tableStr, excludeCarriedOver );
     }
 
-    function bindCarriedOverHotkey() {
-        if ( window[KEYDOWN_BOUND_KEY] ) {
+    function bindHotkeys() {
+        if ( typeof window[KEYDOWN_HANDLER_KEY] === "function" ) {
+            document.removeEventListener( "keydown", window[KEYDOWN_HANDLER_KEY] );
+        } else if ( window[KEYDOWN_BOUND_KEY] ) {
             return;
         }
-        window[KEYDOWN_BOUND_KEY] = true;
-        document.addEventListener( "keydown", function( e ) {
-            if ( !e.shiftKey || e.key.toLowerCase() !== "a" ) {
+        function onKeyDown( e ) {
+            if ( !e.shiftKey || e.ctrlKey || e.altKey || e.metaKey ) {
+                return;
+            }
+            const key = e.key.toLowerCase();
+            if ( key !== "a" && key !== "t" && key !== "r" ) {
                 return;
             }
             const target = e.target;
@@ -57,12 +89,21 @@ javascript:( function() {
                 return;
             }
             e.preventDefault();
-            setExcludeCarriedOver( !getExcludeCarriedOver() );
+            if ( key === "a" ) {
+                setExcludeCarriedOver( !getExcludeCarriedOver() );
+            } else if ( key === "t" ) {
+                setShowCounts( !getShowCounts() );
+            } else if ( key === "r" ) {
+                setShowReviewRow( !getShowReviewRow() );
+            }
             recalculateAndRender();
-        } );
+        }
+        window[KEYDOWN_HANDLER_KEY] = onKeyDown;
+        window[KEYDOWN_BOUND_KEY] = true;
+        document.addEventListener( "keydown", onKeyDown );
     }
 
-    bindCarriedOverHotkey();
+    bindHotkeys();
     recalculateAndRender();
 
     function clickRefreshButtons() {
@@ -193,9 +234,13 @@ javascript:( function() {
         return str.replace(/\s+/g, ' ').trim();
     }
 
-    function formatPointsCount( points, count, regressionSuffix ) {
+    function formatPointsCount( points, count, regressionSuffix, showCounts ) {
         const suffix = regressionSuffix || "";
-        return "<strong>" + points + "</strong>" + suffix + " <span style=\"color:#888\">(" + count + ")</span>";
+        let value = "<strong>" + points + "</strong>" + suffix;
+        if ( showCounts ) {
+            value += " <span style=\"color:#888\">(" + count + ")</span>";
+        }
+        return value;
     }
 
     function removeExcludedPeople( data ) {
@@ -208,7 +253,7 @@ javascript:( function() {
         return cleaned;
     }
 
-    function buildTable( data, statuses, devs ) {
+    function buildTable( data, statuses, devs, showCounts, showReviewRow ) {
         data = removeExcludedPeople( data );
         const headers = ["Status"].concat( devs );
         const colWidths = headers.map( h => h.length );
@@ -216,24 +261,27 @@ javascript:( function() {
             label: "Dev", cells: devs.map( d => {
                 const s = data[d];
                 const regressionSuffix = s.regressionDev > 0 ? "+" + s.regressionDev : "";
-                const devStr = "<a href=\"#\" data-type=\"dev\" data-name=\"" + d + "\">" + formatPointsCount( s.dev, s.devCount, regressionSuffix ) + "</a>";
+                const devStr = "<a href=\"#\" data-type=\"dev\" data-name=\"" + d + "\">" + formatPointsCount( s.dev, s.devCount, regressionSuffix, showCounts ) + "</a>";
                 return devStr;
             } )
-        }, {
-            label: "Review", cells: devs.map( d => {
-                const s = data[d];
-                const regressionSuffix = s.regressionReview > 0 ? "+" + s.regressionReview : "";
-                const revStr = "<a href=\"#\" data-type=\"review\" data-name=\"" + d + "\">" + formatPointsCount( s.review, s.reviewCount, regressionSuffix ) + "</a>";
-                return revStr;
-            } )
-        },];
+        }];
+        if ( showReviewRow ) {
+            metaRows.push( {
+                label: "Review", cells: devs.map( d => {
+                    const s = data[d];
+                    const regressionSuffix = s.regressionReview > 0 ? "+" + s.regressionReview : "";
+                    const revStr = "<a href=\"#\" data-type=\"review\" data-name=\"" + d + "\">" + formatPointsCount( s.review, s.reviewCount, regressionSuffix, showCounts ) + "</a>";
+                    return revStr;
+                } )
+            } );
+        }
         const statusRows = statuses.map( st => {
             return {
                 label: st, cells: devs.map( d => {
                     const pts = ( data[d] && data[d].statusPoints[st] ) || 0;
                     const cnt = ( data[d] && data[d].statusCounts[st] ) || 0;
                     if ( pts === 0 ) return "";
-                    const val = formatPointsCount( pts, cnt );
+                    const val = formatPointsCount( pts, cnt, "", showCounts );
                     return st === "Blocked" ? "<span style=\"color:#f66\">" + val + "</span>" : val;
                 } )
             };
@@ -275,9 +323,13 @@ javascript:( function() {
 
     function buildCarriedOverStatusHtml( excludeCarriedOver ) {
         if ( excludeCarriedOver ) {
-            return "Carried-over tickets are <strong>excluded</strong> from calculations.";
+            return "Carried-over tickets are <strong style=\"color:#f66\">excluded</strong> from calculations.";
         }
-        return "Carried-over tickets are <strong>included</strong> in calculations.";
+        return "Carried-over tickets are <strong style=\"color:#6f6\">included</strong> in calculations.";
+    }
+
+    function buildFooterHtml() {
+        return "<div style=\"margin-bottom:6px\"><strong>Tips</strong></div><ul style=\"margin:0 0 10px 18px;padding:0\"><li>Press <strong>Shift+A</strong> to toggle whether carried-over tickets (Assigned-S* labels) are included in calculations.</li><li>Press <strong>Shift+T</strong> to show or hide the numbers in parentheses.</li><li>Press <strong>Shift+R</strong> to show or hide the Review row.</li></ul><div class=\"carried-over-status\"></div>";
     }
 
     function createOrUpdateBox( tableHTML, excludeCarriedOver ) {
@@ -313,7 +365,7 @@ javascript:( function() {
             footer.style.borderTop = "1px solid #444";
             footer.style.fontFamily = "monospace";
             footer.style.fontSize = "12px";
-            footer.innerHTML = "<div style=\"margin-bottom:6px\"><strong>Tips</strong></div><ul style=\"margin:0 0 10px 18px;padding:0\"><li>Press <strong>Shift+A</strong> to toggle whether carried-over tickets (Assigned-S* labels) are included in calculations.</li></ul><div class=\"carried-over-status\"></div>";
+            footer.innerHTML = buildFooterHtml();
             wrapper.appendChild( header );
             wrapper.appendChild( content );
             wrapper.appendChild( footer );
@@ -367,6 +419,10 @@ javascript:( function() {
         pre.querySelectorAll( "a[data-type][data-name]" ).forEach( a => {
             a.style.color = "#6cf";
         } );
+        const footerEl = wrapper.querySelector( ".work-stats-footer" );
+        if ( footerEl ) {
+            footerEl.innerHTML = buildFooterHtml();
+        }
         const statusEl = wrapper.querySelector( ".carried-over-status" );
         if ( statusEl ) {
             statusEl.innerHTML = buildCarriedOverStatusHtml( excludeCarriedOver );
